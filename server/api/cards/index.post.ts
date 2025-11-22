@@ -47,11 +47,11 @@ export default defineEventHandler(async (event) => {
 
   const { data, error } = await client
     .from('qsl_cards')
-    .insert({
+    .insert([{
       card_number: cardNumber,
       style_id: styleId,
       to_radio: toRadio
-    })
+    }] as any)
     .select('id, card_number, style_id, to_radio, created_at, updated_at')
     .single()
 

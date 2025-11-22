@@ -26,3 +26,5 @@
 - `GET /api/cards/:cardNumber`：获取卡片
 - `PUT /api/cards/:cardNumber`：更新卡片字段 `{ cardNumber?, styleId?, toRadio? }`
 - `DELETE /api/cards/:cardNumber`：删除卡片
+- `GET /api/cards?q=`：按 `to_radio` 模糊搜索卡片
+- `POST /api/auth/register`：注册新用户（首个用户自动赋予 `app_metadata.role=admin`），随后可在 `/login` 登录
