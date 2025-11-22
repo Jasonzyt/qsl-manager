@@ -7,17 +7,83 @@
       title="加载失败"
       :description="String(error)"
     />
-    <div
-      class="max-h-screen max-w-[1000px] m-auto rounded-2xl border-2 border-accented"
-    >
-      <UTable :data="rows" :columns="columns" :loading="pending" />
+
+    <div class="max-w-[1000px] m-auto">
+      <div class="mb-4">
+        搜索 ToRadio:
+        <UInput
+          v-model="searchInputValue"
+          placeholder="搜索 toRadio..."
+          class="max-w-sm"
+          :disabled="status === 'pending'"
+          clearable
+        />
+      </div>
+      <UCard class="w-full">
+        <UTable
+          ref="table"
+          :data="rows"
+          :columns="columns"
+          :loading="status === 'pending'"
+          sticky
+          class="h-[80vh]"
+        />
+      </UCard>
     </div>
+
+    <UModal
+      v-model:open="editOpen"
+      :close="{
+        color: 'primary',
+        variant: 'ghost',
+        class: 'rounded-full',
+      }"
+    >
+      <template #header>
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold">编辑卡片</h3>
+        </div>
+      </template>
+      <template #body>
+        <div class="space-y-4">
+          <UFormField label="卡片编号" name="cardNumber" required>
+            <UInput v-model="editForm.cardNumber" type="number" />
+          </UFormField>
+          <UFormField label="样式" name="styleId" required>
+            <USelectMenu
+              v-model="editForm.style"
+              :items="styleOptions"
+              option-attribute="label"
+              placeholder="选择样式"
+              class="w-56 h-8"
+            />
+          </UFormField>
+          <UFormField label="toRadio" name="toRadio" required>
+            <UInput v-model="editForm.toRadio" />
+          </UFormField>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="editOpen = false">
+            取消
+          </UButton>
+          <UButton color="primary" :loading="editLoading" @click="submitEdit">
+            保存
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { h } from "vue";
 import type { TableColumn } from "@nuxt/ui";
+import { useDebounceFn, useInfiniteScroll } from "@vueuse/core";
+import type { Row } from "@tanstack/vue-table";
+const UButton = resolveComponent("UButton");
+const UDropdownMenu = resolveComponent("UDropdownMenu");
 
 type Card = {
   id: number;
@@ -29,6 +95,42 @@ type Card = {
 };
 
 const search = ref("");
+const searchInputValue = ref("");
+const { data: stylesData } = await useAsyncData("styles", () =>
+  $fetch("/api/styles")
+);
+const styleMap = computed(() => {
+  const map = new Map<number, string>();
+  (stylesData.value || []).forEach((s: any) => {
+    map.set(s.id, s.style_name);
+  });
+  return map;
+});
+
+const styleOptions = computed(() => {
+  const list = (stylesData.value as any[] | null) || [];
+  return list
+    .slice()
+    .sort((a, b) => a.id - b.id)
+    .map((s) => ({
+      id: String(s.id),
+      label: `${s.id} - ${s.style_name}`,
+    }));
+});
+
+const limit = 20;
+const skip = ref(0);
+const rows = ref<Card[]>([]);
+const total = ref(0);
+const editOpen = ref(false);
+const editLoading = ref(false);
+const editForm = reactive({
+  cardNumber: "",
+  style: { id: "", label: "" },
+  toRadio: "",
+});
+const originalCardNumber = ref<number | null>(null);
+const toast = useToast();
 
 const formatDate = (value?: string) => {
   if (!value) return "";
@@ -57,12 +159,15 @@ const columns: TableColumn<Card>[] = [
   },
   {
     accessorKey: "style_id",
-    header: "样式 ID",
-    cell: ({ row }) =>
-      h("div", { class: "pill" }, [
+    header: "样式",
+    cell: ({ row }) => {
+      const id = row.getValue("style_id") as number;
+      const name = styleMap.value.get(id);
+      return h("div", { class: "pill" }, [
         h("i", { class: "i-lucide-palette text-sm" }),
-        h("span", `#${row.getValue("style_id")}`),
-      ]),
+        h("span", name || `#${id}`),
+      ]);
+    },
   },
   {
     accessorKey: "updated_at",
@@ -70,27 +175,169 @@ const columns: TableColumn<Card>[] = [
     cell: ({ row }) => formatDate(row.getValue("updated_at") as string),
   },
   {
-    accessorKey: "created_at",
-    header: "创建于",
-    cell: ({ row }) => formatDate(row.getValue("created_at") as string),
+    id: "actions",
+    cell: ({ row }) => {
+      return h(
+        "div",
+        { class: "text-right" },
+        h(
+          UDropdownMenu,
+          {
+            content: {
+              align: "end",
+            },
+            items: getRowItems(row),
+            "aria-label": "Actions dropdown",
+          },
+          () =>
+            h(UButton, {
+              icon: "i-lucide-ellipsis-vertical",
+              color: "neutral",
+              variant: "ghost",
+              class: "ml-auto",
+              "aria-label": "Actions dropdown",
+            })
+        )
+      );
+    },
   },
 ];
 
-const {
-  data: cards,
-  pending,
-  error,
-  refresh,
-} = await useAsyncData(
-  "cards",
-  () =>
-    $fetch("/api/cards", {
-      params: { q: search.value || undefined },
-    }),
-  { watch: [search] }
+function getRowItems(row: Row<Card>) {
+  return [
+    {
+      type: "label",
+      label: "Actions",
+    },
+    {
+      label: "Modify Card",
+      onSelect() {
+        openEditor(row.original);
+      },
+    },
+  ];
+}
+
+const { data, status, error, execute } = await useFetch("/api/cards", {
+  key: "cards-infinite",
+  params: { q: search, limit, offset: skip },
+  transform: (payload: any) => payload,
+  lazy: true,
+  immediate: false,
+});
+
+watch(
+  data,
+  (val) => {
+    if (!val) return;
+    const items = (val as any).items || [];
+    total.value = (val as any).total || 0;
+    if (skip.value === 0) {
+      rows.value = items;
+    } else {
+      rows.value = [...rows.value, ...items];
+    }
+  },
+  { immediate: false }
 );
 
-const rows = computed(() => cards.value || []);
+const triggerSearch = useDebounceFn(() => {
+  rows.value = [];
+  skip.value = 0;
+  search.value = searchInputValue.value.trim();
+}, 1000);
+
+watch(
+  () => searchInputValue.value,
+  () => {
+    triggerSearch();
+  }
+);
+
+const table = useTemplateRef("table");
+
+const loadMore = () => {
+  if (status.value === "pending") return;
+  if (rows.value.length >= total.value) return;
+  skip.value += limit;
+  execute();
+};
+
+const openEditor = (card: Card) => {
+  originalCardNumber.value = card.card_number;
+  editForm.cardNumber = String(card.card_number);
+  editForm.style.id = String(card.style_id);
+  editForm.style.label = styleMap.value.get(card.style_id)
+    ? String(card.style_id)
+    : "";
+  editForm.toRadio = card.to_radio;
+  editOpen.value = true;
+};
+
+const submitEdit = async () => {
+  if (!originalCardNumber.value) return;
+
+  const cardNumber = Number.parseInt(editForm.cardNumber, 10);
+  const styleId = Number.parseInt(editForm.style.id, 10);
+  const toRadio = editForm.toRadio.trim();
+
+  if (!Number.isInteger(cardNumber) || !Number.isInteger(styleId) || !toRadio) {
+    toast.add({
+      title: "请输入合法的卡片编号、样式 ID 和 toRadio",
+      color: "error",
+    });
+    return;
+  }
+
+  try {
+    editLoading.value = true;
+    const updated = (await $fetch(`/api/cards/${originalCardNumber.value}`, {
+      method: "PUT",
+      body: { cardNumber, styleId, toRadio },
+    })) as Card;
+
+    const idx = rows.value.findIndex(
+      (r) => r.card_number === originalCardNumber.value
+    );
+    if (idx !== -1) {
+      rows.value[idx] = updated;
+    }
+
+    toast.add({
+      title: "已更新卡片",
+      description: `卡片 #${updated.card_number} 已保存`,
+      color: "success",
+    });
+    editOpen.value = false;
+  } catch (err: any) {
+    toast.add({
+      title: "更新失败",
+      description:
+        err?.data?.statusMessage ||
+        err?.data?.message ||
+        err?.message ||
+        "更新失败",
+      color: "error",
+    });
+  } finally {
+    editLoading.value = false;
+  }
+};
+
+onMounted(() => {
+  execute();
+  useInfiniteScroll(
+    table.value?.$el,
+    () => {
+      loadMore();
+    },
+    {
+      distance: 200,
+      canLoadMore: () =>
+        status.value !== "pending" && rows.value.length < total.value,
+    }
+  );
+});
 </script>
 
 <style scoped>

@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const insertPayload: Record<string, number | string> = {
+  const insertPayload: { id?: number; style_name: string } = {
     style_name: styleName
   }
 
@@ -40,14 +40,15 @@ export default defineEventHandler(async (event) => {
 
   const { data, error } = await client
     .from('qsl_card_styles')
-    .insert(insertPayload)
+    // Cast to any to satisfy TS inference with untyped DB schema.
+    .insert([insertPayload] as any)
     .select('id, style_name, created_at')
     .single()
 
   if (error) {
     throw createError({
       statusCode: 500,
-      statusMessage: 'Failed to create style',
+      statusMessage: 'Failed to create style' + (error.message ? `: ${error.message}` : ''),
       data: error.message
     })
   }
