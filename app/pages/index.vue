@@ -1,14 +1,14 @@
 <template>
   <div class="py-8">
-    <UAlert
-      v-if="error"
-      color="error"
-      variant="soft"
-      title="加载失败"
-      :description="String(error)"
-    />
-
     <div class="max-w-[1000px] m-auto">
+      <UAlert
+        v-if="error"
+        color="error"
+        variant="soft"
+        title="加载失败"
+        :description="String(error)"
+        class="mb-4"
+      />
       <div class="mb-4 flex gap-4">
         <div>
           搜索 ToRadio:
@@ -21,15 +21,15 @@
           />
         </div>
         <div>
-          跳转到编号:
+          跳过前
           <UInput
             v-model="jumpToInputValue"
-            placeholder="编号"
+            placeholder="多少条"
             class="max-w-sm"
             :disabled="status === 'pending'"
             clearable
             type="number"
-          />
+          />记录
         </div>
       </div>
       <UCard class="w-full">
@@ -286,8 +286,8 @@ const table = useTemplateRef("table");
 
 const loadMore = () => {
   if (status.value === "pending") return;
-  if (rows.value.length >= total.value) return;
   skip.value += limit;
+  if (skip.value >= total.value) return;
   execute();
 };
 
@@ -362,7 +362,7 @@ onMounted(() => {
     {
       distance: 200,
       canLoadMore: () =>
-        status.value !== "pending" && rows.value.length < total.value,
+        status.value !== "pending" && skip.value + limit < total.value,
     }
   );
 });
