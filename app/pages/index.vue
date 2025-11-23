@@ -9,15 +9,28 @@
     />
 
     <div class="max-w-[1000px] m-auto">
-      <div class="mb-4">
-        搜索 ToRadio:
-        <UInput
-          v-model="searchInputValue"
-          placeholder="搜索 toRadio..."
-          class="max-w-sm"
-          :disabled="status === 'pending'"
-          clearable
-        />
+      <div class="mb-4 flex gap-4">
+        <div>
+          搜索 ToRadio:
+          <UInput
+            v-model="searchInputValue"
+            placeholder="搜索 toRadio..."
+            class="max-w-sm"
+            :disabled="status === 'pending'"
+            clearable
+          />
+        </div>
+        <div>
+          跳转到编号:
+          <UInput
+            v-model="jumpToInputValue"
+            placeholder="编号"
+            class="max-w-sm"
+            :disabled="status === 'pending'"
+            clearable
+            type="number"
+          />
+        </div>
       </div>
       <UCard class="w-full">
         <UTable
@@ -96,6 +109,9 @@ type Card = {
 
 const search = ref("");
 const searchInputValue = ref("");
+
+const jumpToInputValue = ref(0);
+
 const { data: stylesData } = await useAsyncData("styles", () =>
   $fetch("/api/styles")
 );
@@ -251,6 +267,18 @@ watch(
   () => searchInputValue.value,
   () => {
     triggerSearch();
+  }
+);
+
+const triggerJump = useDebounceFn(() => {
+  rows.value = [];
+  skip.value = jumpToInputValue.value - 1;
+}, 1000);
+
+watch(
+  () => jumpToInputValue.value,
+  () => {
+    triggerJump();
   }
 );
 
