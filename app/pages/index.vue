@@ -33,14 +33,16 @@
         </div>
       </div>
       <UCard class="w-full">
-        <UTable
-          ref="table"
-          :data="rows"
-          :columns="columns"
-          :loading="status === 'pending'"
-          sticky
-          class="h-[80vh]"
-        />
+        <div ref="scrollArea" class="h-[80vh] overflow-auto">
+          <UTable
+            ref="table"
+            :data="rows"
+            :columns="columns"
+            :loading="status === 'pending'"
+            sticky
+            class="min-h-[60vh]"
+          />
+        </div>
       </UCard>
     </div>
 
@@ -87,6 +89,7 @@
         </div>
       </template>
     </UModal>
+
   </div>
 </template>
 
@@ -235,7 +238,7 @@ function getRowItems(row: Row<Card>) {
 }
 
 const { data, status, error, execute } = await useFetch("/api/cards", {
-  key: "cards-infinite",
+  key: computed(() => `cards-${search.value}-${skip.value}`),
   params: { q: search, limit, offset: skip },
   transform: (payload: any) => payload,
   lazy: true,
@@ -261,7 +264,8 @@ const triggerSearch = useDebounceFn(() => {
   rows.value = [];
   skip.value = 0;
   search.value = searchInputValue.value.trim();
-}, 1000);
+  execute();
+}, 500);
 
 watch(
   () => searchInputValue.value,
@@ -272,8 +276,9 @@ watch(
 
 const triggerJump = useDebounceFn(() => {
   rows.value = [];
-  skip.value = jumpToInputValue.value - 1;
-}, 1000);
+  skip.value = Math.max(0, Number(jumpToInputValue.value) || 0);
+  execute();
+}, 500);
 
 watch(
   () => jumpToInputValue.value,
@@ -282,12 +287,12 @@ watch(
   }
 );
 
-const table = useTemplateRef("table");
+const scrollArea = useTemplateRef("scrollArea");
 
 const loadMore = () => {
   if (status.value === "pending") return;
+  if (total.value && rows.value.length >= total.value) return;
   skip.value += limit;
-  if (skip.value >= total.value) return;
   execute();
 };
 
@@ -355,14 +360,15 @@ const submitEdit = async () => {
 onMounted(() => {
   execute();
   useInfiniteScroll(
-    table.value?.$el,
+    () => scrollArea.value || window,
     () => {
       loadMore();
     },
     {
       distance: 200,
       canLoadMore: () =>
-        status.value !== "pending" && skip.value + limit < total.value,
+        status.value !== "pending" &&
+        (!total.value || rows.value.length < total.value),
     }
   );
 });
